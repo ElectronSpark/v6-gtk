@@ -1161,6 +1161,16 @@ gdk_wayland_display_set_cursor_theme (GdkDisplay  *display,
   theme = wl_cursor_theme_load (name, size, display_wayland->shm);
   if (theme == NULL)
     {
+      if (g_strcmp0 (name, "default") == 0)
+        {
+          theme = wl_cursor_theme_load ("Adwaita", size, display_wayland->shm);
+          if (theme != NULL)
+            name = "Adwaita";
+        }
+    }
+
+  if (theme == NULL)
+    {
       g_warning ("Failed to load cursor theme %s", name);
       return;
     }
@@ -1304,16 +1314,16 @@ open_shared_memory (void)
   static gboolean force_shm_open = FALSE;
   int ret = -1;
 
-#if !defined (__NR_memfd_create)
+#if !defined (SYS_memfd_create)
   force_shm_open = TRUE;
 #endif
 
   do
     {
-#if defined (__NR_memfd_create)
+#if defined (SYS_memfd_create)
       if (!force_shm_open)
         {
-          ret = syscall (__NR_memfd_create, "gdk-wayland", MFD_CLOEXEC);
+          ret = memfd_create ("gdk-wayland", MFD_CLOEXEC);
 
           /* fall back to shm_open until debian stops shipping 3.16 kernel
            * See bug 766341
