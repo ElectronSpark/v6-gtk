@@ -1188,7 +1188,8 @@ _gdk_wayland_display_get_scaled_cursor_theme (GdkWaylandDisplay *display_wayland
 {
   struct wl_cursor_theme *theme;
 
-  g_assert (display_wayland->cursor_theme_name);
+  if (display_wayland->cursor_theme_name == NULL)
+    return NULL;
   g_assert (scale <= GDK_WAYLAND_MAX_THEME_SCALE);
   g_assert (scale >= 1);
 
@@ -1382,6 +1383,19 @@ create_shm_pool (struct wl_shm  *shm,
 
   pool = wl_shm_create_pool (shm, fd, size);
 
+  if (pool == NULL)
+    {
+      int saved_errno = errno;
+      fprintf (stderr,
+               "gdk-wayland: wl_shm_create_pool failed size=%d errno=%d (%s)\n",
+               size, saved_errno, g_strerror (saved_errno));
+      g_critical (G_STRLOC ": wl_shm_create_pool failed: errno=%d (%s)",
+                  saved_errno, g_strerror (saved_errno));
+      munmap (data, size);
+      close (fd);
+      return NULL;
+    }
+
   close (fd);
 
   *data_out = data;
@@ -1427,6 +1441,11 @@ _gdk_wayland_display_create_shm_surface (GdkWaylandDisplay *display,
                                 height*scale*stride,
                                 &data->buf_length,
                                 &data->buf);
+  if (data->pool == NULL)
+    {
+      g_free (data);
+      return NULL;
+    }
 
   surface = cairo_image_surface_create_for_data (data->buf,
                                                  CAIRO_FORMAT_ARGB32,
@@ -1437,6 +1456,19 @@ _gdk_wayland_display_create_shm_surface (GdkWaylandDisplay *display,
   data->buffer = wl_shm_pool_create_buffer (data->pool, 0,
                                             width*scale, height*scale,
                                             stride, WL_SHM_FORMAT_ARGB8888);
+  if (data->buffer == NULL)
+    {
+      int saved_errno = errno;
+      fprintf (stderr,
+               "gdk-wayland: wl_shm_pool_create_buffer failed width=%d height=%d stride=%d errno=%d (%s)\n",
+               width * scale, height * scale, stride,
+               saved_errno, g_strerror (saved_errno));
+      wl_shm_pool_destroy (data->pool);
+      munmap (data->buf, data->buf_length);
+      g_free (data);
+      cairo_surface_destroy (surface);
+      return NULL;
+    }
 
   cairo_surface_set_user_data (surface, &gdk_wayland_shm_surface_cairo_key,
                                data, gdk_wayland_cairo_surface_destroy);
@@ -1457,6 +1489,8 @@ struct wl_buffer *
 _gdk_wayland_shm_surface_get_wl_buffer (cairo_surface_t *surface)
 {
   GdkWaylandCairoSurfaceData *data = cairo_surface_get_user_data (surface, &gdk_wayland_shm_surface_cairo_key);
+  if (data == NULL)
+    return NULL;
   return data->buffer;
 }
 

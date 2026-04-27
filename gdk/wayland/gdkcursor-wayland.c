@@ -153,6 +153,9 @@ _gdk_wayland_cursor_update (GdkWaylandDisplay *display_wayland,
 
   theme = _gdk_wayland_display_get_scaled_cursor_theme (display_wayland,
                                                         cursor->scale);
+  if (theme == NULL)
+    return FALSE;
+
   c = wl_cursor_theme_get_cursor (theme, cursor->name);
   if (!c)
     {
@@ -539,8 +542,13 @@ _gdk_wayland_display_get_cursor_for_surface (GdkDisplay *display,
                                              cursor->surface.width / cursor->surface.scale,
                                              cursor->surface.height / cursor->surface.scale,
                                              cursor->surface.scale);
+  if (cursor->surface.cairo_surface == NULL)
+    return GDK_CURSOR (cursor);
 
   buffer = _gdk_wayland_shm_surface_get_wl_buffer (cursor->surface.cairo_surface);
+  if (buffer == NULL)
+    return GDK_CURSOR (cursor);
+
   wl_buffer_add_listener (buffer, &buffer_listener, cursor->surface.cairo_surface);
 
   if (surface)

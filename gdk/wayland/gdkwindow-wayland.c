@@ -992,12 +992,18 @@ gdk_wayland_window_ensure_cairo_surface (GdkWindow *window)
                                                                              impl->wrapper->width,
                                                                              impl->wrapper->height,
                                                                              impl->scale);
+      if (impl->staging_cairo_surface == NULL)
+        return;
+
       cairo_surface_set_user_data (impl->staging_cairo_surface,
                                    &gdk_wayland_window_cairo_key,
                                    g_object_ref (impl),
                                    (cairo_destroy_func_t)
                                    g_object_unref);
       buffer = _gdk_wayland_shm_surface_get_wl_buffer (impl->staging_cairo_surface);
+      if (buffer == NULL)
+        return;
+
       wl_buffer_add_listener (buffer, &buffer_listener, impl->staging_cairo_surface);
     }
 }
@@ -1018,6 +1024,16 @@ gdk_wayland_window_ref_cairo_surface (GdkWindow *window)
     return NULL;
 
   gdk_wayland_window_ensure_cairo_surface (window);
+
+  if (impl->staging_cairo_surface == NULL)
+    {
+      impl->staging_cairo_surface =
+        cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
+                                    MAX (impl->wrapper->width, 1) * impl->scale,
+                                    MAX (impl->wrapper->height, 1) * impl->scale);
+      cairo_surface_set_device_scale (impl->staging_cairo_surface,
+                                      impl->scale, impl->scale);
+    }
 
   cairo_surface_reference (impl->staging_cairo_surface);
 
