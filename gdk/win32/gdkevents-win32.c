@@ -1734,7 +1734,7 @@ gdk_event_translate (MSG *msg,
       /* Let the system handle Alt-Tab, Alt-Space and Alt-F4 unless
        * the keyboard is grabbed.
        */
-      if (!keyboard_grab &&
+      if (!surface->shortcuts_inhibited &&
 	  (msg->wParam == VK_TAB ||
 	   msg->wParam == VK_SPACE ||
 	   msg->wParam == VK_F4))
