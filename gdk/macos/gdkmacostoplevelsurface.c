@@ -362,10 +362,6 @@ _gdk_macos_toplevel_surface_begin_resize (GdkToplevel    *toplevel,
   if (GDK_SURFACE_DESTROYED (toplevel))
     return;
 
-  /* Release passive grab */
-  if (button != 0)
-    gdk_seat_ungrab (gdk_device_get_seat (device));
-
   if ((nswindow = _gdk_macos_surface_get_native (GDK_MACOS_SURFACE (toplevel))))
     [(GdkMacosWindow *)nswindow beginManualResize:edge];
 }
@@ -384,10 +380,6 @@ _gdk_macos_toplevel_surface_begin_move (GdkToplevel *toplevel,
 
   if (GDK_SURFACE_DESTROYED (toplevel))
     return;
-
-  /* Release passive grab */
-  if (button != 0)
-    gdk_seat_ungrab (gdk_device_get_seat (device));
 
   if ((nswindow = _gdk_macos_surface_get_native (GDK_MACOS_SURFACE (toplevel))))
     [(GdkMacosWindow *)nswindow beginManualMove];
