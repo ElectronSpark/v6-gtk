@@ -764,23 +764,17 @@ fill_event (GdkMacosDisplay *self,
 
     case NSEventTypeMouseExited:
     case NSEventTypeMouseEntered:
-      {
-        GdkSeat *seat = gdk_display_get_default_seat (GDK_DISPLAY (self));
-        GdkDevice *pointer = gdk_seat_get_pointer (seat);
-        GdkDeviceGrabInfo *grab = _gdk_display_get_last_device_grab (GDK_DISPLAY (self), pointer);
+      if ([(GdkMacosWindow *)window isInManualResizeOrMove])
+        {
+          ret = GDK_MACOS_EVENT_DROP;
+        }
+      else
+        {
+          if (event_type == NSEventTypeMouseExited)
+            [[NSCursor arrowCursor] set];
 
-        if ([(GdkMacosWindow *)window isInManualResizeOrMove])
-          {
-            ret = GDK_MACOS_EVENT_DROP;
-          }
-        else if (grab == NULL || grab->owner_events)
-          {
-            if (event_type == NSEventTypeMouseExited)
-              [[NSCursor arrowCursor] set];
-
-            ret = synthesize_crossing_event (self, surface, nsevent, x, y);
-          }
-      }
+          ret = synthesize_crossing_event (self, surface, nsevent, x, y);
+        }
 
       break;
 
@@ -819,22 +813,6 @@ is_mouse_button_press_event (NSEventType type)
     default:
       return FALSE;
     }
-}
-
-static void
-get_surface_point_from_screen_point (GdkSurface *surface,
-                                     NSPoint     screen_point,
-                                     int        *x,
-                                     int        *y)
-{
-  NSWindow *nswindow;
-  NSPoint point;
-
-  nswindow = _gdk_macos_surface_get_native (GDK_MACOS_SURFACE (surface));
-  point = convert_nspoint_from_screen (nswindow, screen_point);
-
-  *x = point.x;
-  *y = surface->height - point.y;
 }
 
 static GdkSurface *
@@ -982,13 +960,12 @@ find_surface_for_keyboard_event (NSEvent *nsevent)
       GdkSurface *surface = GDK_SURFACE ([view gdkSurface]);
       GdkDisplay *display = gdk_surface_get_display (surface);
       GdkSeat *seat = gdk_display_get_default_seat (display);
-      GdkDevice *device = gdk_seat_get_keyboard (seat);
-      GdkDeviceGrabInfo *grab = _gdk_display_get_last_device_grab (display, device);
+      GdkSurface *grab_surface;
 
-      if (grab && grab->surface && !grab->owner_events)
-        return GDK_MACOS_SURFACE (grab->surface);
+      grab_surface = gdk_seat_get_topmost_grab_surface (seat);
 
-      return GDK_MACOS_SURFACE (surface);
+      if (grab_surface)
+        return GDK_MACOS_SURFACE (grab_surface);
     }
 
   return NULL;
@@ -1003,9 +980,7 @@ find_surface_for_mouse_event (GdkMacosDisplay *self,
   NSPoint point;
   NSEventType event_type;
   GdkSurface *surface;
-  GdkDisplay *display;
-  GdkDevice *pointer;
-  GdkDeviceGrabInfo *grab;
+  GdkSurface *grab_surface;
   GdkSeat *seat;
 
   /* Even if we had a surface window, it might be for something outside
@@ -1015,9 +990,7 @@ find_surface_for_mouse_event (GdkMacosDisplay *self,
   if (!(surface = get_surface_from_ns_event (self, nsevent, &point, x, y)))
     return NULL;
 
-  display = gdk_surface_get_display (surface);
   seat = gdk_display_get_default_seat (GDK_DISPLAY (self));
-  pointer = gdk_seat_get_pointer (seat);
 
   event_type = [nsevent type];
 
@@ -1030,37 +1003,26 @@ find_surface_for_mouse_event (GdkMacosDisplay *self,
    * event_mask. For either value of owner_events, unreported
    * events are discarded.
    */
-  if ((grab = _gdk_display_get_last_device_grab (display, pointer)))
+  grab_surface = gdk_seat_get_topmost_grab_surface (seat);
+  if (grab_surface)
     {
-      if (grab->owner_events)
-        {
-          /* For owner events, we need to use the surface under the
-           * pointer, not the window from the NSEvent, since that is
-           * reported with respect to the key window, which could be
-           * wrong.
-           */
-          GdkSurface *surface_under_pointer;
-          int x_tmp, y_tmp;
+      /* For owner events, we need to use the surface under the
+       * pointer, not the window from the NSEvent, since that is
+       * reported with respect to the key window, which could be
+       * wrong.
+       */
+      GdkSurface *surface_under_pointer;
+      int x_tmp, y_tmp;
 
-          surface_under_pointer = find_surface_under_pointer (self, point, &x_tmp, &y_tmp);
-          if (surface_under_pointer)
-            {
-              surface = surface_under_pointer;
-              *x = x_tmp;
-              *y = y_tmp;
-            }
-
-          return GDK_MACOS_SURFACE (surface);
-        }
-      else
+      surface_under_pointer = find_surface_under_pointer (self, point, &x_tmp, &y_tmp);
+      if (surface_under_pointer)
         {
-          /* Finally check the grab window. */
-          GdkSurface *grab_surface = grab->surface;
-          get_surface_point_from_screen_point (grab_surface, point, x, y);
-          return GDK_MACOS_SURFACE (grab_surface);
+          surface = surface_under_pointer;
+          *x = x_tmp;
+          *y = y_tmp;
         }
 
-      return NULL;
+      return GDK_MACOS_SURFACE (surface);
     }
   else
     {
