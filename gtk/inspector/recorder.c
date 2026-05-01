@@ -51,6 +51,7 @@
 #include <gsk/gskcolornodeprivate.h>
 #include <gsk/gskcomponenttransfernodeprivate.h>
 #include <gsk/gskcopypasteutilsprivate.h>
+#include <gsk/gskdisplacementnodeprivate.h>
 #include <gsk/gskinsetshadownodeprivate.h>
 #include <gsk/gskoutsetshadownodeprivate.h>
 #include <gsk/gskrendererprivate.h>
@@ -1016,6 +1017,23 @@ add_rect_row (GListStore            *store,
                        rect->size.height);
 }
 
+static void G_GNUC_UNUSED
+add_snap_row (GListStore *store,
+              const char *name,
+              GskRectSnap snap)
+{
+  char *names[4];
+  gsize i;
+
+  for (i = 0; i < 4; i++)
+    names[i] = g_enum_to_string (GSK_TYPE_SNAP_DIRECTION, gsk_rect_snap_get_direction (snap, i));
+
+  add_text_row (store, name, "%s %s %s %s", names[0], names[1], names[2], names[3]);
+
+  for (i = 0; i < 4; i++)
+    g_free (names[i]);
+}
+
 static void
 populate_render_node_properties (GListStore            *store,
                                  GskRenderNode         *node,
@@ -1072,6 +1090,7 @@ populate_render_node_properties (GListStore            *store,
         GdkTexture *texture = gsk_texture_node_get_texture (node);
 
         add_texture_rows (store, texture);
+        add_snap_row (store, "Snap", gsk_texture_node_get_snap (node));
       }
       break;
 
@@ -1091,6 +1110,7 @@ populate_render_node_properties (GListStore            *store,
 
     case GSK_COLOR_NODE:
       add_color_row (store, "Color", gsk_color_node_get_gdk_color (node));
+      add_snap_row (store, "Snap", gsk_color_node_get_snap (node));
       break;
 
     case GSK_LINEAR_GRADIENT_NODE:
@@ -1108,6 +1128,7 @@ populate_render_node_properties (GListStore            *store,
         GString *s;
         GdkTexture *texture;
 
+        add_snap_row (store, "Snap", gsk_linear_gradient_node_get_snap (node));
         add_text_row (store, "Direction", "%.2f %.2f ⟶ %.2f %.2f", start->x, start->y, end->x, end->y);
         add_text_row (store, "Interpolation", "%s", gdk_color_state_get_name (interpolation));
         add_text_row (store, "Hue Interpolation", "%s", hue_interpolation_to_string (hue_interpolation));
@@ -1150,6 +1171,7 @@ populate_render_node_properties (GListStore            *store,
         GString *s;
         GdkTexture *texture;
 
+        add_snap_row (store, "Snap", gsk_radial_gradient_node_get_snap (node));
         add_text_row (store, "Center", "%.2f, %.2f", center->x, center->y);
         add_text_row (store, "Direction", "%.2f ⟶  %.2f", start, end);
         add_text_row (store, "Radius", "%.2f, %.2f", hradius, vradius);
@@ -1189,6 +1211,7 @@ populate_render_node_properties (GListStore            *store,
         GString *s;
         GdkTexture *texture;
 
+        add_snap_row (store, "Snap", gsk_conic_gradient_node_get_snap (node));
         add_text_row (store, "Center", "%.2f, %.2f", center->x, center->y);
         add_text_row (store, "Rotation", "%.2f", rotation);
         add_text_row (store, "Interpolation", "%s", gdk_color_state_get_name (interpolation));
@@ -1442,6 +1465,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
         const graphene_matrix_t *matrix = gsk_color_matrix_node_get_color_matrix (node);
         const graphene_vec4_t *offset = gsk_color_matrix_node_get_color_offset (node);
 
+        add_snap_row (store, "Snap", gsk_color_matrix_node_get_snap (node));
         add_text_row (store, "Matrix",
                              "% .2f % .2f % .2f % .2f\n"
                              "% .2f % .2f % .2f % .2f\n"
@@ -1477,6 +1501,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
       {
         const graphene_rect_t *clip = gsk_clip_node_get_clip (node);
         add_rect_row (store, "Clip", clip);
+        add_snap_row (store, "Snap", gsk_clip_node_get_snap (node));
       }
       break;
 
@@ -1484,6 +1509,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
       {
         const GskRoundedRect *clip = gsk_rounded_clip_node_get_clip (node);
         add_rect_row (store, "Clip", &clip->bounds);
+        add_snap_row (store, "Snap", gsk_rounded_clip_node_get_snap (node));
 
         add_text_row (store, "Top Left Corner Size", "%.2f x %.2f", clip->corner[0].width, clip->corner[0].height);
         add_text_row (store, "Top Right Corner Size", "%.2f x %.2f", clip->corner[1].width, clip->corner[1].height);
@@ -1609,6 +1635,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
       break;
 
     case GSK_PASTE_NODE:
+      add_snap_row (store, "Snap", gsk_paste_node_get_snap (node));
       add_uint_row (store, "Copy to paste", gsk_paste_node_get_depth (node));
       break;
 
@@ -1642,6 +1669,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
     case GSK_DISPLACEMENT_NODE:
       {
+        add_snap_row (store, "Snap", gsk_displacement_node_get_snap (node));
       }
       break;
 

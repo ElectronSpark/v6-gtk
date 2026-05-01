@@ -31,6 +31,8 @@
 
 #include "gsk/gskarithmeticnodeprivate.h"
 #include "gsk/gskbordernodeprivate.h"
+#include "gsk/gskclipnodeprivate.h"
+#include "gsk/gskcolormatrixnodeprivate.h"
 #include "gsk/gskcolornodeprivate.h"
 #include "gsk/gskconicgradientnodeprivate.h"
 #include "gsk/gskdisplacementnodeprivate.h"
@@ -38,12 +40,15 @@
 #include "gsk/gskisolationnodeprivate.h"
 #include "gsk/gsklineargradientnodeprivate.h"
 #include "gsk/gskoutsetshadownodeprivate.h"
+#include "gsk/gskpastenodeprivate.h"
 #include "gsk/gskradialgradientnodeprivate.h"
 #include "gsk/gskrendernodeprivate.h"
 #include "gsk/gskrepeatnodeprivate.h"
+#include "gsk/gskroundedclipnodeprivate.h"
 #include "gsk/gskroundedrectprivate.h"
 #include "gsk/gskstrokeprivate.h"
 #include "gsk/gsktextnodeprivate.h"
+#include "gsk/gsktexturenodeprivate.h"
 #include "gsk/gskrectprivate.h"
 
 #include "gtk/gskpangoprivate.h"
@@ -77,6 +82,7 @@
  */
 
 typedef struct _GtkSnapshotState GtkSnapshotState;
+typedef struct _GtkSnapshotProperties GtkSnapshotProperties;
 
 typedef GskRenderNode * (* GtkSnapshotCollectFunc) (GtkSnapshot      *snapshot,
                                                     GtkSnapshotState *state,
@@ -84,11 +90,16 @@ typedef GskRenderNode * (* GtkSnapshotCollectFunc) (GtkSnapshot      *snapshot,
                                                     guint             n_nodes);
 typedef void            (* GtkSnapshotClearFunc)   (GtkSnapshotState *state);
 
+struct _GtkSnapshotProperties {
+  GskRectSnap            snap;
+};
+
 struct _GtkSnapshotState {
   guint                  start_node_index;
   guint                  n_nodes;
 
   GskTransform *         transform;
+  GtkSnapshotProperties  props;
 
   GtkSnapshotCollectFunc collect_func;
   GtkSnapshotClearFunc   clear_func;
@@ -102,6 +113,7 @@ struct _GtkSnapshotState {
     struct {
       graphene_matrix_t matrix;
       graphene_vec4_t offset;
+      GskRectSnap snap;
     } color_matrix;
     struct {
       GskComponentTransfer *red;
@@ -116,6 +128,7 @@ struct _GtkSnapshotState {
     } repeat;
     struct {
       graphene_rect_t bounds;
+      GskRectSnap snap;
     } clip;
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     struct {
@@ -133,6 +146,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     } glshader_texture;
     struct {
       GskRoundedRect bounds;
+      GskRectSnap snap;
     } rounded_clip;
     struct {
       GskPath *path;
@@ -174,6 +188,7 @@ G_GNUC_END_IGNORE_DEPRECATIONS
     } isolation;
     struct {
       graphene_rect_t bounds;
+      GskRectSnap snap;
       GskRenderNode *displacement_node;
       GdkColorChannel channels[2];
       graphene_size_t max;
@@ -268,10 +283,11 @@ gtk_snapshot_collect_default (GtkSnapshot       *snapshot,
 }
 
 static GtkSnapshotState *
-gtk_snapshot_push_state (GtkSnapshot            *snapshot,
-                         GskTransform           *transform,
-                         GtkSnapshotCollectFunc  collect_func,
-                         GtkSnapshotClearFunc    clear_func)
+gtk_snapshot_push_state (GtkSnapshot                 *snapshot,
+                         GskTransform                *transform,
+                         const GtkSnapshotProperties *props,
+                         GtkSnapshotCollectFunc       collect_func,
+                         GtkSnapshotClearFunc         clear_func)
 {
   const gsize n_states = gtk_snapshot_states_get_size (&snapshot->state_stack);
   GtkSnapshotState *state;
@@ -280,6 +296,7 @@ gtk_snapshot_push_state (GtkSnapshot            *snapshot,
   state = gtk_snapshot_states_get (&snapshot->state_stack, n_states);
 
   state->transform = gsk_transform_ref (transform);
+  state->props = *props;
   state->collect_func = collect_func;
   state->clear_func = clear_func;
   state->start_node_index = gtk_snapshot_nodes_get_size (&snapshot->nodes);
@@ -337,6 +354,9 @@ gtk_snapshot_init (GtkSnapshot *self)
 
   gtk_snapshot_push_state (self,
                            NULL,
+                           &(GtkSnapshotProperties) {
+                             .snap = GSK_RECT_SNAP_NONE,
+                           },
                            gtk_snapshot_collect_default,
                            NULL);
 }
@@ -409,6 +429,7 @@ gtk_snapshot_collect_autopush_transform (GtkSnapshot      *snapshot,
   GtkSnapshotState *previous_state;
 
   previous_state = gtk_snapshot_get_previous_state (snapshot);
+  previous_state->props = state->props;
 
   node = gtk_snapshot_collect_default (snapshot, state, nodes, n_nodes);
   if (node == NULL)
@@ -424,8 +445,11 @@ gtk_snapshot_collect_autopush_transform (GtkSnapshot      *snapshot,
 static void
 gtk_snapshot_autopush_transform (GtkSnapshot *snapshot)
 {
+  GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
+
   gtk_snapshot_push_state (snapshot,
                            NULL,
+                           &state->props,
                            gtk_snapshot_collect_autopush_transform,
                            NULL);
 }
@@ -488,6 +512,7 @@ gtk_snapshot_push_debug (GtkSnapshot *snapshot,
 
       state = gtk_snapshot_push_state (snapshot,
                                        current_state->transform,
+                                       &current_state->props,
                                        gtk_snapshot_collect_debug,
                                        gtk_snapshot_clear_debug);
 
@@ -501,6 +526,7 @@ gtk_snapshot_push_debug (GtkSnapshot *snapshot,
     {
       gtk_snapshot_push_state (snapshot,
                                current_state->transform,
+                               &current_state->props,
                                gtk_snapshot_collect_default,
                                NULL);
     }
@@ -554,6 +580,7 @@ gtk_snapshot_push_opacity (GtkSnapshot *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_opacity,
                                    NULL);
   state->data.opacity.opacity = CLAMP (opacity, 0.0, 1.0);
@@ -609,41 +636,10 @@ gtk_snapshot_push_isolation (GtkSnapshot  *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_isolation,
                                    NULL);
   state->data.isolation.features = features;
-}
-
-static GskRenderNode *
-merge_color_matrix_nodes (const graphene_matrix_t *matrix2,
-                          const graphene_vec4_t   *offset2,
-                          GskRenderNode           *child)
-{
-  const graphene_matrix_t *matrix1 = gsk_color_matrix_node_get_color_matrix (child);
-  const graphene_vec4_t *offset1 = gsk_color_matrix_node_get_color_offset (child);
-  graphene_matrix_t matrix;
-  graphene_vec4_t offset;
-  GskRenderNode *result;
-
-  g_assert (gsk_render_node_get_node_type (child) == GSK_COLOR_MATRIX_NODE);
-
-  /* color matrix node: color = trans(mat) * p + offset; for a pixel p.
-   * color =  trans(mat2) * (trans(mat1) * p + offset1) + offset2
-   *       =  trans(mat2) * trans(mat1) * p + trans(mat2) * offset1 + offset2
-   *       = trans(mat1 * mat2) * p + (trans(mat2) * offset1 + offset2)
-   * Which this code does.
-   * mat1 and offset1 come from @child.
-   */
-
-  graphene_matrix_transform_vec4 (matrix2, offset1, &offset);
-  graphene_vec4_add (&offset, offset2, &offset);
-
-  graphene_matrix_multiply (matrix1, matrix2, &matrix);
-
-  result = gsk_color_matrix_node_new (gsk_color_matrix_node_get_child (child),
-                                      &matrix, &offset);
-
-  return result;
 }
 
 static GskRenderNode *
@@ -658,42 +654,13 @@ gtk_snapshot_collect_color_matrix (GtkSnapshot      *snapshot,
   if (node == NULL)
     return NULL;
 
-  if (gsk_render_node_get_node_type (node) == GSK_COLOR_MATRIX_NODE)
-    {
-      result = merge_color_matrix_nodes (&state->data.color_matrix.matrix,
-                                         &state->data.color_matrix.offset,
-                                         node);
-      gsk_render_node_unref (node);
-    }
-  else if (gsk_render_node_get_node_type (node) == GSK_TRANSFORM_NODE)
-    {
-      GskRenderNode *transform_child = gsk_transform_node_get_child (node);
-      GskRenderNode *color_matrix;
-
-      if (gsk_render_node_get_node_type (transform_child) == GSK_COLOR_MATRIX_NODE)
-        {
-          color_matrix = merge_color_matrix_nodes (&state->data.color_matrix.matrix,
-                                                   &state->data.color_matrix.offset,
-                                                   transform_child);
-        }
-      else
-        {
-          color_matrix = gsk_color_matrix_node_new (transform_child,
-                                                    &state->data.color_matrix.matrix,
-                                                    &state->data.color_matrix.offset);
-        }
-      result = gsk_transform_node_new (color_matrix,
-                                       gsk_transform_node_get_transform (node));
-      gsk_render_node_unref (color_matrix);
-      gsk_render_node_unref (node);
-    }
-  else
-    {
-      result = gsk_color_matrix_node_new (node,
-                                          &state->data.color_matrix.matrix,
-                                          &state->data.color_matrix.offset);
-      gsk_render_node_unref (node);
-    }
+  result = gsk_color_matrix_node_new2 (&node->bounds,
+                                       state->data.color_matrix.snap,
+                                       node,
+                                       GDK_COLOR_STATE_SRGB,
+                                       &state->data.color_matrix.matrix,
+                                       &state->data.color_matrix.offset);
+  gsk_render_node_unref (node);
 
   return result;
 }
@@ -726,11 +693,13 @@ gtk_snapshot_push_color_matrix (GtkSnapshot             *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_color_matrix,
                                    NULL);
 
   graphene_matrix_init_from_matrix (&state->data.color_matrix.matrix, color_matrix);
   graphene_vec4_init_from_vec4 (&state->data.color_matrix.offset, color_offset);
+  state->data.color_matrix.snap = state->props.snap;
 }
 
 static GskRenderNode *
@@ -793,6 +762,7 @@ gtk_snapshot_push_component_transfer (GtkSnapshot                *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_component_transfer,
                                    gtk_snapshot_clear_component_transfer);
 
@@ -823,7 +793,7 @@ gtk_snapshot_collect_repeat (GtkSnapshot      *snapshot,
       /* Repeating a color node entirely is pretty easy by just increasing
        * the size of the color node.
        */
-      GskRenderNode *color_node = gsk_color_node_new2 (gsk_color_node_get_gdk_color (node), bounds);
+      GskRenderNode *color_node = gsk_color_node_new2 (gsk_color_node_get_gdk_color (node), bounds, GSK_RECT_SNAP_NONE);
 
       gsk_render_node_unref (node);
 
@@ -995,6 +965,7 @@ gtk_snapshot_push_blur (GtkSnapshot *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_blur,
                                    NULL);
   state->data.blur.radius = radius * scale_x;
@@ -1006,7 +977,7 @@ gtk_snapshot_push_repeat2 (GtkSnapshot           *snapshot,
                            const graphene_rect_t *child_bounds,
                            GskRepeat              repeat)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
   gboolean empty_child_bounds = FALSE;
   graphene_rect_t real_child_bounds = { { 0 } };
   float scale_x, scale_y, dx, dy;
@@ -1020,8 +991,10 @@ gtk_snapshot_push_repeat2 (GtkSnapshot           *snapshot,
         empty_child_bounds = TRUE;
     }
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    empty_child_bounds
                                    ? gtk_snapshot_collect_discard_repeat
                                    : gtk_snapshot_collect_repeat,
@@ -1075,7 +1048,7 @@ gtk_snapshot_collect_clip (GtkSnapshot      *snapshot,
       return NULL;
     }
 
-  clip_node = gsk_clip_node_new (node, &state->data.clip.bounds);
+  clip_node = gsk_clip_node_new2 (node, &state->data.clip.bounds, state->data.clip.snap);
 
   gsk_render_node_unref (node);
 
@@ -1095,17 +1068,20 @@ void
 gtk_snapshot_push_clip (GtkSnapshot           *snapshot,
                         const graphene_rect_t *bounds)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
   float scale_x, scale_y, dx, dy;
 
   gtk_snapshot_ensure_affine (snapshot, &scale_x, &scale_y, &dx, &dy);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_clip,
                                    NULL);
 
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &state->data.clip.bounds);
+  state->data.clip.snap = state->props.snap;
 }
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
@@ -1249,15 +1225,17 @@ gtk_snapshot_push_gl_shader (GtkSnapshot           *snapshot,
                              const graphene_rect_t *bounds,
                              GBytes                *take_args)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
   float scale_x, scale_y, dx, dy;
   graphene_rect_t transformed_bounds;
   int n_children = gsk_gl_shader_get_n_textures (shader);
 
   gtk_snapshot_ensure_affine (snapshot, &scale_x, &scale_y, &dx, &dy);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_gl_shader,
                                    gtk_snapshot_clear_gl_shader);
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &transformed_bounds);
@@ -1271,8 +1249,10 @@ gtk_snapshot_push_gl_shader (GtkSnapshot           *snapshot,
 
   for (int i = 0; i  < n_children; i++)
     {
+      current_state = gtk_snapshot_get_current_state (snapshot);
       state = gtk_snapshot_push_state (snapshot,
-                                       gtk_snapshot_get_current_state (snapshot)->transform,
+                                       current_state->transform,
+                                       &current_state->props,
                                        gtk_snapshot_collect_gl_shader_texture,
                                        NULL);
       state->data.glshader_texture.bounds = transformed_bounds;
@@ -1300,14 +1280,18 @@ gtk_snapshot_collect_rounded_clip (GtkSnapshot      *snapshot,
       if (graphene_rect_contains_rect (&state->data.rounded_clip.bounds.bounds, &node->bounds))
         return node;
 
-      clip_node = gsk_clip_node_new (node, &state->data.rounded_clip.bounds.bounds);
+      clip_node = gsk_clip_node_new2 (node,
+                                      &state->data.rounded_clip.bounds.bounds,
+                                      state->data.rounded_clip.snap);
     }
   else
     {
       if (gsk_rounded_rect_contains_rect (&state->data.rounded_clip.bounds, &node->bounds))
         return node;
 
-      clip_node = gsk_rounded_clip_node_new (node, &state->data.rounded_clip.bounds);
+      clip_node = gsk_rounded_clip_node_new2 (node,
+                                              &state->data.rounded_clip.bounds,
+                                              state->data.rounded_clip.snap);
     }
 
   if (clip_node->bounds.size.width == 0 ||
@@ -1338,17 +1322,20 @@ void
 gtk_snapshot_push_rounded_clip (GtkSnapshot          *snapshot,
                                 const GskRoundedRect *bounds)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
   float scale_x, scale_y, dx, dy;
 
   gtk_snapshot_ensure_affine (snapshot, &scale_x, &scale_y, &dx, &dy);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_rounded_clip,
                                    NULL);
 
   gsk_rounded_rect_scale_affine (&state->data.rounded_clip.bounds, bounds, scale_x, scale_y, dx, dy);
+  state->data.rounded_clip.snap = state->props.snap;
 }
 
 static GskRenderNode *
@@ -1408,12 +1395,14 @@ gtk_snapshot_push_fill (GtkSnapshot *snapshot,
                         GskPath     *path,
                         GskFillRule  fill_rule)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
 
   gtk_snapshot_ensure_identity (snapshot);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_fill,
                                    gtk_snapshot_clear_fill);
 
@@ -1513,12 +1502,14 @@ gtk_snapshot_push_stroke (GtkSnapshot     *snapshot,
                           GskPath         *path,
                           const GskStroke *stroke)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
 
   gtk_snapshot_ensure_identity (snapshot);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
-                                   gtk_snapshot_get_current_state (snapshot)->transform,
+                                   current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_stroke,
                                    gtk_snapshot_clear_stroke);
 
@@ -1640,7 +1631,7 @@ gtk_snapshot_push_shadows (GtkSnapshot          *snapshot,
                            const GskShadowEntry *shadow,
                            gsize                 n_shadows)
 {
-  GtkSnapshotState *state;
+  GtkSnapshotState *state, *current_state;
   GskTransform *transform;
   float scale_x, scale_y, dx, dy;
   gsize i;
@@ -1651,8 +1642,10 @@ gtk_snapshot_push_shadows (GtkSnapshot          *snapshot,
                                          &dx, &dy);
   transform = gsk_transform_scale (gsk_transform_translate (NULL, &GRAPHENE_POINT_INIT (dx, dy)), scale_x, scale_y);
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
   state = gtk_snapshot_push_state (snapshot,
                                    transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_shadow,
                                    gtk_snapshot_clear_shadow);
 
@@ -1758,12 +1751,14 @@ gtk_snapshot_push_blend (GtkSnapshot  *snapshot,
 
   top_state = gtk_snapshot_push_state (snapshot,
                                        current_state->transform,
+                                       &current_state->props,
                                        gtk_snapshot_collect_blend_top,
                                        gtk_snapshot_clear_blend_top);
   top_state->data.blend.blend_mode = blend_mode;
 
   gtk_snapshot_push_state (snapshot,
                            top_state->transform,
+                           &top_state->props,
                            gtk_snapshot_collect_blend_bottom,
                            NULL);
 }
@@ -1838,6 +1833,7 @@ gtk_snapshot_push_mask (GtkSnapshot *snapshot,
 
   source_state = gtk_snapshot_push_state (snapshot,
                                           current_state->transform,
+                                          &current_state->props,
                                           gtk_snapshot_collect_mask_source,
                                           gtk_snapshot_clear_mask_source);
 
@@ -1845,6 +1841,7 @@ gtk_snapshot_push_mask (GtkSnapshot *snapshot,
 
   gtk_snapshot_push_state (snapshot,
                            source_state->transform,
+                           &source_state->props,
                            gtk_snapshot_collect_mask_mask,
                            NULL);
 }
@@ -1891,6 +1888,7 @@ gtk_snapshot_push_copy (GtkSnapshot *snapshot)
 
   gtk_snapshot_push_state (snapshot,
                            current_state->transform,
+                           &current_state->props,
                            gtk_snapshot_collect_copy,
                            NULL);
 }
@@ -1966,6 +1964,7 @@ gtk_snapshot_push_composite (GtkSnapshot   *snapshot,
 
   child_state = gtk_snapshot_push_state (snapshot,
                                          current_state->transform,
+                                         &current_state->props,
                                          gtk_snapshot_collect_composite_child,
                                          gtk_snapshot_clear_composite_child);
 
@@ -1973,6 +1972,7 @@ gtk_snapshot_push_composite (GtkSnapshot   *snapshot,
 
   gtk_snapshot_push_state (snapshot,
                            child_state->transform,
+                           &child_state->props,
                            gtk_snapshot_collect_composite_mask,
                            NULL);
 }
@@ -2075,12 +2075,14 @@ gtk_snapshot_push_cross_fade (GtkSnapshot *snapshot,
 
   end_state = gtk_snapshot_push_state (snapshot,
                                        current_state->transform,
+                                       &current_state->props,
                                        gtk_snapshot_collect_cross_fade_end,
                                        gtk_snapshot_clear_cross_fade_end);
   end_state->data.cross_fade.progress = progress;
 
   gtk_snapshot_push_state (snapshot,
                            end_state->transform,
+                           &end_state->props,
                            gtk_snapshot_collect_cross_fade_start,
                            NULL);
 }
@@ -2102,6 +2104,7 @@ gtk_snapshot_collect_displacement (GtkSnapshot      *snapshot,
     state->data.displacement.displacement_node = gsk_container_node_new (NULL, 0);
 
   node = gsk_displacement_node_new (&state->data.displacement.bounds,
+                                    state->data.displacement.snap,
                                     child_node,
                                     state->data.displacement.displacement_node,
                                     state->data.displacement.channels,
@@ -2177,6 +2180,7 @@ gtk_snapshot_push_displacement (GtkSnapshot            *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_displacement,
                                    gtk_snapshot_clear_displacement);
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &state->data.displacement.bounds);
@@ -2191,6 +2195,7 @@ gtk_snapshot_push_displacement (GtkSnapshot            *snapshot,
 
   gtk_snapshot_push_state (snapshot,
                            state->transform,
+                           &state->props,
                            gtk_snapshot_collect_displacement_displacement,
                            NULL);
 }
@@ -2286,6 +2291,7 @@ gtk_snapshot_push_arithmetic (GtkSnapshot           *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_arithmetic,
                                    gtk_snapshot_clear_arithmetic);
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &state->data.arithmetic.bounds);
@@ -2297,6 +2303,7 @@ gtk_snapshot_push_arithmetic (GtkSnapshot           *snapshot,
 
   gtk_snapshot_push_state (snapshot,
                            state->transform,
+                           &state->props,
                            gtk_snapshot_collect_arithmetic_first,
                            NULL);
 }
@@ -2427,10 +2434,8 @@ gtk_snapshot_pop_internal (GtkSnapshot *snapshot,
   return gtk_snapshot_pop_one (snapshot);
 }
 
-/**
+/*<private>
  * gtk_snapshot_push_collect:
- *
- * Private.
  *
  * Pushes state so a later pop_collect call can collect all nodes
  * appended until that point.
@@ -2440,6 +2445,9 @@ gtk_snapshot_push_collect (GtkSnapshot *snapshot)
 {
   gtk_snapshot_push_state (snapshot,
                            NULL,
+                           &(GtkSnapshotProperties) {
+                             .snap = GSK_RECT_SNAP_NONE,
+                           },
                            gtk_snapshot_collect_default,
                            NULL);
 }
@@ -2601,10 +2609,15 @@ gtk_snapshot_gl_shader_pop_texture (GtkSnapshot *snapshot)
 void
 gtk_snapshot_save (GtkSnapshot *snapshot)
 {
+  GtkSnapshotState *current_state;
+
   g_return_if_fail (GTK_IS_SNAPSHOT (snapshot));
 
+  current_state = gtk_snapshot_get_current_state (snapshot);
+
   gtk_snapshot_push_state (snapshot,
-                           gtk_snapshot_get_current_state (snapshot)->transform,
+                           current_state->transform,
+                           &current_state->props,
                            NULL,
                            NULL);
 }
@@ -2640,6 +2653,31 @@ gtk_snapshot_restore (GtkSnapshot *snapshot)
 
   node = gtk_snapshot_pop_one (snapshot);
   g_assert (node == NULL);
+}
+
+/**
+ * gtk_snapshot_set_snap:
+ * @self: a `GtkSnapshot`
+ * @snap: the snapping mode to use
+ *
+ * Sets the snapping mode to use when appending snappable content
+ * to the snapshot.
+ *
+ * The snap mode is part of the current state, so [method@Snapshot.save]
+ * and [method@Snapshot.restore] can be used to remember a snap mode.
+ *
+ * Since: 4.24
+ **/
+void
+gtk_snapshot_set_snap (GtkSnapshot *self,
+                       GskRectSnap  snap)
+{
+  GtkSnapshotState *state;
+
+  g_return_if_fail (GTK_IS_SNAPSHOT (self));
+
+  state = gtk_snapshot_get_current_state (self);
+  state->props.snap = snap;
 }
 
 /**
@@ -2959,6 +2997,7 @@ gtk_snapshot_append_texture (GtkSnapshot           *snapshot,
                              GdkTexture            *texture,
                              const graphene_rect_t *bounds)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
   graphene_rect_t real_bounds;
   float scale_x, scale_y, dx, dy;
@@ -2969,7 +3008,7 @@ gtk_snapshot_append_texture (GtkSnapshot           *snapshot,
 
   gtk_snapshot_ensure_affine (snapshot, &scale_x, &scale_y, &dx, &dy);
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &real_bounds);
-  node = gsk_texture_node_new (texture, &real_bounds);
+  node = gsk_texture_node_new2 (texture, &real_bounds, state->props.snap);
 
   gtk_snapshot_append_node_internal (snapshot, node);
 }
@@ -3047,6 +3086,7 @@ gtk_snapshot_add_color (GtkSnapshot           *snapshot,
                         const GdkColor        *color,
                         const graphene_rect_t *bounds)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
   graphene_rect_t real_bounds;
   float scale_x, scale_y, dx, dy;
@@ -3058,7 +3098,7 @@ gtk_snapshot_add_color (GtkSnapshot           *snapshot,
   gtk_snapshot_ensure_affine (snapshot, &scale_x, &scale_y, &dx, &dy);
   gtk_graphene_rect_scale_affine (bounds, scale_x, scale_y, dx, dy, &real_bounds);
 
-  node = gsk_color_node_new2 (color, &real_bounds);
+  node = gsk_color_node_new2 (color, &real_bounds, state->props.snap);
 
   gtk_snapshot_append_node_internal (snapshot, node);
 }
@@ -3154,6 +3194,7 @@ gtk_snapshot_add_linear_gradient (GtkSnapshot             *snapshot,
                                   const graphene_point_t  *end_point,
                                   const GskGradient       *gradient)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
   graphene_rect_t real_bounds;
   float scale_x, scale_y, dx, dy;
@@ -3180,13 +3221,14 @@ gtk_snapshot_add_linear_gradient (GtkSnapshot             *snapshot,
       real_end_point.y = scale_y * end_point->y + dy;
 
       node = gsk_linear_gradient_node_new2 (&real_bounds,
+                                            state->props.snap,
                                             &real_start_point,
                                             &real_end_point,
                                             gradient);
     }
   else
     {
-      node = gsk_color_node_new2 (color, &real_bounds);
+      node = gsk_color_node_new2 (color, &real_bounds, state->props.snap);
     }
 
   gtk_snapshot_append_node_internal (snapshot, node);
@@ -3274,6 +3316,7 @@ gtk_snapshot_add_conic_gradient (GtkSnapshot            *snapshot,
                                  float                   rotation,
                                  const GskGradient      *gradient)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
   graphene_rect_t real_bounds;
   float dx, dy;
@@ -3288,6 +3331,7 @@ gtk_snapshot_add_conic_gradient (GtkSnapshot            *snapshot,
   color = gsk_gradient_check_single_color (gradient);
   if (color == NULL)
     node = gsk_conic_gradient_node_new2 (&real_bounds,
+                                         state->props.snap,
                                          &GRAPHENE_POINT_INIT(
                                            center->x + dx,
                                            center->y + dy
@@ -3295,7 +3339,7 @@ gtk_snapshot_add_conic_gradient (GtkSnapshot            *snapshot,
                                          rotation,
                                          gradient);
   else
-    node = gsk_color_node_new2 (color, &real_bounds);
+    node = gsk_color_node_new2 (color, &real_bounds, state->props.snap);
 
   gtk_snapshot_append_node_internal (snapshot, node);
 }
@@ -3363,6 +3407,7 @@ gtk_snapshot_add_radial_gradient (GtkSnapshot             *snapshot,
                                   float                    aspect_ratio,
                                   const GskGradient       *gradient)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
   graphene_rect_t real_bounds;
   float scale_x, scale_y, dx, dy;
@@ -3382,7 +3427,7 @@ gtk_snapshot_add_radial_gradient (GtkSnapshot             *snapshot,
   if (color && gsk_radial_gradient_fills_plane (start_center, start_radius,
                                                 end_center, end_radius))
     {
-      node = gsk_color_node_new2 (color, &real_bounds);
+      node = gsk_color_node_new2 (color, &real_bounds, state->props.snap);
     }
   else
     {
@@ -3396,6 +3441,7 @@ gtk_snapshot_add_radial_gradient (GtkSnapshot             *snapshot,
       real_end.y = scale_y * end_center->y + dy;
 
       node = gsk_radial_gradient_node_new2 (&real_bounds,
+                                            state->props.snap,
                                             &real_start, start_radius * scale_x,
                                             &real_end, end_radius * scale_x,
                                             aspect_ratio * (scale_x / scale_y),
@@ -3681,6 +3727,7 @@ gtk_snapshot_append_paste (GtkSnapshot           *snapshot,
                            const graphene_rect_t *bounds,
                            gsize                  nth)
 {
+  const GtkSnapshotState *state = gtk_snapshot_get_current_state (snapshot);
   GskRenderNode *node;
 
   g_return_if_fail (snapshot != NULL);
@@ -3690,7 +3737,7 @@ gtk_snapshot_append_paste (GtkSnapshot           *snapshot,
    * in the copy and the paste coordinate system. */
   gtk_snapshot_ensure_identity (snapshot);
 
-  node = gsk_paste_node_new (bounds, nth);
+  node = gsk_paste_node_new2 (bounds, state->props.snap, nth);
 
   gtk_snapshot_append_node_internal (snapshot, node);
 }
@@ -3728,6 +3775,7 @@ gtk_snapshot_push_subsurface (GtkSnapshot   *snapshot,
 
   state = gtk_snapshot_push_state (snapshot,
                                    current_state->transform,
+                                   &current_state->props,
                                    gtk_snapshot_collect_subsurface,
                                    gtk_snapshot_clear_subsurface);
 

@@ -1012,7 +1012,7 @@ apply_filter_tree (SvgElement    *shape,
 
             gdk_color_init_copy (&c, svg_color_get_color (color));
             c.alpha *= svg_number_get (alpha, 1);
-            result = gsk_color_node_new2 (&c, &subregion);
+            result = gsk_color_node_new2 (&c, &subregion, GSK_RECT_SNAP_NONE);
             gdk_color_finish (&c);
           }
           break;
@@ -1251,11 +1251,11 @@ apply_filter_tree (SvgElement    *shape,
                 GdkColor new_color;
 
                 color_apply_color_matrix (color, color_state, &matrix, &offset,  &new_color);
-                result = gsk_color_node_new2 (&new_color, &node->bounds);
+                result = gsk_color_node_new2 (&new_color, &node->bounds, GSK_RECT_SNAP_NONE);
                 gdk_color_finish (&new_color);
               }
             else
-              result = gsk_color_matrix_node_new2 (&in->node->bounds, in->node, color_state, &matrix, &offset);
+              result = gsk_color_matrix_node_new2 (&in->node->bounds, GSK_RECT_SNAP_NONE, in->node, color_state, &matrix, &offset);
 
             filter_result_unref (in);
           }
@@ -1389,6 +1389,7 @@ apply_filter_tree (SvgElement    *shape,
             offset.x = offset.y = 0.5;
 
             result = gsk_displacement_node_new (&subregion,
+                                                GSK_RECT_SNAP_NONE,
                                                 in->node, in2->node,
                                                 channels,
                                                 &max, &scale, &offset);
@@ -3015,7 +3016,7 @@ stroke_shape (SvgElement   *shape,
         gdk_color_init_copy (&color, svg_paint_get_color (paint));
         color.alpha *= opacity;
         opacity = 1;
-        child = gsk_color_node_new2 (&color, &paint_bounds);
+        child = gsk_color_node_new2 (&color, &paint_bounds, GSK_RECT_SNAP_NONE);
         gdk_color_finish (&color);
       }
       break;
