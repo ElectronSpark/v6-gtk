@@ -298,8 +298,13 @@ gdk_display_manager_get (void)
 {
   static GdkDisplayManager *manager = NULL;
 
-  if (manager == NULL)
-    manager = g_object_new (GDK_TYPE_DISPLAY_MANAGER, NULL);
+  if (g_once_init_enter (&manager))
+    {
+      GdkDisplayManager *new_manager;
+
+      new_manager = g_object_new (GDK_TYPE_DISPLAY_MANAGER, NULL);
+      g_once_init_leave (&manager, new_manager);
+    }
   
   return manager;
 }

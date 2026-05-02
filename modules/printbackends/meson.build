@@ -24,6 +24,9 @@ else
   enabled_print_backends = []
   foreach backend: wanted_print_backends
     if backend != ''
+      if backend == 'none'
+        continue
+      endif
       if not all_print_backends.contains(backend)
         error('print backend \'@0@\' unknown'.format(backend))
       endif
@@ -35,7 +38,7 @@ endif
 print_backends = []
 
 if not enabled_print_backends.contains('file')
-  if os_unix
+  if os_unix and not wanted_print_backends.contains('none')
     error('\'file\' print backed needs to be enabled')
   endif
 else

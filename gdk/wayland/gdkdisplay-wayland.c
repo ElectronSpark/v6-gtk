@@ -625,17 +625,25 @@ _gdk_wayland_display_open (const gchar *display_name)
 
   wl_log_set_handler_client (log_handler);
 
+  g_printerr ("gdk-wayland: display_open name=%s\n",
+              display_name ? display_name : "(default)");
   wl_display = wl_display_connect (display_name);
   if (!wl_display)
-    return NULL;
+    {
+      g_printerr ("gdk-wayland: wl_display_connect failed errno=%d\n", errno);
+      return NULL;
+    }
+  g_printerr ("gdk-wayland: wl_display_connect ok\n");
 
   display = g_object_new (GDK_TYPE_WAYLAND_DISPLAY, NULL);
   display->device_manager = _gdk_wayland_device_manager_new (display);
+  g_printerr ("gdk-wayland: device manager created\n");
 
   display_wayland = GDK_WAYLAND_DISPLAY (display);
   display_wayland->wl_display = wl_display;
   display_wayland->screen = _gdk_wayland_screen_new (display);
   display_wayland->event_source = _gdk_wayland_display_event_source_new (display);
+  g_printerr ("gdk-wayland: screen and event source created\n");
 
   display_wayland->known_globals =
     g_hash_table_new_full (NULL, NULL, NULL, g_free);
@@ -645,25 +653,36 @@ _gdk_wayland_display_open (const gchar *display_name)
 
   display_wayland->wl_registry = wl_display_get_registry (display_wayland->wl_display);
   wl_registry_add_listener (display_wayland->wl_registry, &registry_listener, display_wayland);
+  g_printerr ("gdk-wayland: registry roundtrip begin\n");
   if (wl_display_roundtrip (display_wayland->wl_display) < 0)
     {
+      g_printerr ("gdk-wayland: registry roundtrip failed errno=%d\n", errno);
       g_object_unref (display);
       return NULL;
     }
+  g_printerr ("gdk-wayland: registry roundtrip done\n");
 
+  g_printerr ("gdk-wayland: processing globals\n");
   process_on_globals_closures (display_wayland);
+  g_printerr ("gdk-wayland: globals processed async_roundtrips=%d\n",
+              g_list_length (display_wayland->async_roundtrips));
   display_wayland->selection = gdk_wayland_selection_new ();
 
   /* Wait for initializing to complete. This means waiting for all
    * asynchrounous roundtrips that were triggered during initial roundtrip. */
   while (g_list_length (display_wayland->async_roundtrips) > 0)
     {
+      g_printerr ("gdk-wayland: async roundtrip dispatch pending=%d\n",
+                  g_list_length (display_wayland->async_roundtrips));
       if (wl_display_dispatch (display_wayland->wl_display) < 0)
         {
+          g_printerr ("gdk-wayland: async roundtrip dispatch failed errno=%d\n",
+                      errno);
           g_object_unref (display);
           return NULL;
         }
     }
+  g_printerr ("gdk-wayland: async roundtrips complete\n");
 
   if (display_wayland->xdg_wm_base_id)
     {
@@ -698,6 +717,8 @@ _gdk_wayland_display_open (const gchar *display_name)
     }
 
   g_signal_emit_by_name (display, "opened");
+  g_printerr ("gdk-wayland: display opened shell_variant=%d\n",
+              display_wayland->shell_variant);
 
   return display;
 }
@@ -1445,7 +1466,24 @@ _gdk_wayland_display_create_shm_surface (GdkWaylandDisplay *display,
   data->buffer = NULL;
   data->scale = scale;
 
+  if (width <= 0 || height <= 0 || scale == 0)
+    {
+      fprintf (stderr,
+               "gdk-wayland: refusing invalid shm surface width=%d height=%d scale=%u\n",
+               width, height, scale);
+      g_free (data);
+      return NULL;
+    }
+
   stride = cairo_format_stride_for_width (CAIRO_FORMAT_ARGB32, width*scale);
+  if (stride <= 0)
+    {
+      fprintf (stderr,
+               "gdk-wayland: invalid cairo stride width=%d height=%d scale=%u stride=%d\n",
+               width, height, scale, stride);
+      g_free (data);
+      return NULL;
+    }
 
   data->pool = create_shm_pool (display->shm,
                                 height*scale*stride,
@@ -1462,6 +1500,20 @@ _gdk_wayland_display_create_shm_surface (GdkWaylandDisplay *display,
                                                  width*scale,
                                                  height*scale,
                                                  stride);
+  status = cairo_surface_status (surface);
+  if (status != CAIRO_STATUS_SUCCESS)
+    {
+      g_critical (G_STRLOC ": Unable to create Cairo image surface: %s",
+                  cairo_status_to_string (status));
+      fprintf (stderr,
+               "gdk-wayland: cairo shm surface failed width=%d height=%d scale=%u stride=%d status=%d\n",
+               width, height, scale, stride, status);
+      wl_shm_pool_destroy (data->pool);
+      munmap (data->buf, data->buf_length);
+      g_free (data);
+      cairo_surface_destroy (surface);
+      return NULL;
+    }
 
   data->buffer = wl_shm_pool_create_buffer (data->pool, 0,
                                             width*scale, height*scale,
@@ -1485,19 +1537,15 @@ _gdk_wayland_display_create_shm_surface (GdkWaylandDisplay *display,
 
   cairo_surface_set_device_scale (surface, scale, scale);
 
-  status = cairo_surface_status (surface);
-  if (status != CAIRO_STATUS_SUCCESS)
-    {
-      g_critical (G_STRLOC ": Unable to create Cairo image surface: %s",
-                  cairo_status_to_string (status));
-    }
-
   return surface;
 }
 
 struct wl_buffer *
 _gdk_wayland_shm_surface_get_wl_buffer (cairo_surface_t *surface)
 {
+  if (surface == NULL)
+    return NULL;
+
   GdkWaylandCairoSurfaceData *data = cairo_surface_get_user_data (surface, &gdk_wayland_shm_surface_cairo_key);
   if (data == NULL)
     return NULL;
@@ -1507,6 +1555,9 @@ _gdk_wayland_shm_surface_get_wl_buffer (cairo_surface_t *surface)
 gboolean
 _gdk_wayland_is_shm_surface (cairo_surface_t *surface)
 {
+  if (surface == NULL)
+    return FALSE;
+
   return cairo_surface_get_user_data (surface, &gdk_wayland_shm_surface_cairo_key) != NULL;
 }
 
