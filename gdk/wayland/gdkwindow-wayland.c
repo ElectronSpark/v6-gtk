@@ -48,6 +48,20 @@ enum {
 
 static guint signals[LAST_SIGNAL];
 
+static gboolean
+gdk_wayland_xv6_trace_enabled (void)
+{
+  static int enabled = -1;
+
+  if (enabled < 0)
+    {
+      const char *env = getenv ("GDK_WAYLAND_XV6_TRACE");
+      enabled = env && env[0] && strcmp (env, "0") != 0;
+    }
+
+  return enabled;
+}
+
 #define WINDOW_IS_TOPLEVEL_OR_FOREIGN(window) \
   (GDK_WINDOW_TYPE (window) != GDK_WINDOW_CHILD &&   \
    GDK_WINDOW_TYPE (window) != GDK_WINDOW_OFFSCREEN)
@@ -751,14 +765,15 @@ on_frame_clock_after_paint (GdkFrameClock *clock,
   if (window->update_freeze_count > 0)
     return;
 
-  fprintf (stderr,
-           "gdk-wayland: after-paint window=%p size=%dx%d pending_buffer=%d egl=%p staging=%p shm=%d mapped=%d\n",
-           window, window->width, window->height,
-           impl->pending_buffer_attached,
-           impl->display_server.egl_window,
-           impl->staging_cairo_surface,
-           _gdk_wayland_is_shm_surface (impl->staging_cairo_surface),
-           impl->mapped);
+  if (gdk_wayland_xv6_trace_enabled ())
+    fprintf (stderr,
+             "gdk-wayland: after-paint window=%p size=%dx%d pending_buffer=%d egl=%p staging=%p shm=%d mapped=%d\n",
+             window, window->width, window->height,
+             impl->pending_buffer_attached,
+             impl->display_server.egl_window,
+             impl->staging_cairo_surface,
+             _gdk_wayland_is_shm_surface (impl->staging_cairo_surface),
+             impl->mapped);
 
   _gdk_frame_clock_freeze (clock);
 
@@ -1051,10 +1066,11 @@ gdk_wayland_window_ensure_cairo_surface (GdkWindow *window)
   /* If we are drawing using OpenGL then we only need a logical 1x1 surface. */
   if (impl->display_server.egl_window)
     {
-      fprintf (stderr,
-               "gdk-wayland: ensure cairo using EGL placeholder window=%p size=%dx%d scale=%u staging=%p\n",
-               window, impl->wrapper->width, impl->wrapper->height, impl->scale,
-               impl->staging_cairo_surface);
+      if (gdk_wayland_xv6_trace_enabled ())
+        fprintf (stderr,
+                 "gdk-wayland: ensure cairo using EGL placeholder window=%p size=%dx%d scale=%u staging=%p\n",
+                 window, impl->wrapper->width, impl->wrapper->height, impl->scale,
+                 impl->staging_cairo_surface);
 
       if (impl->staging_cairo_surface &&
           _gdk_wayland_is_shm_surface (impl->staging_cairo_surface))
@@ -1074,10 +1090,11 @@ gdk_wayland_window_ensure_cairo_surface (GdkWindow *window)
       GdkWaylandDisplay *display_wayland = GDK_WAYLAND_DISPLAY (gdk_window_get_display (impl->wrapper));
       struct wl_buffer *buffer;
 
-      fprintf (stderr,
-               "gdk-wayland: ensure cairo creating SHM window=%p size=%dx%d scale=%u wl_shm=%p\n",
-               window, impl->wrapper->width, impl->wrapper->height, impl->scale,
-               display_wayland->shm);
+      if (gdk_wayland_xv6_trace_enabled ())
+        fprintf (stderr,
+                 "gdk-wayland: ensure cairo creating SHM window=%p size=%dx%d scale=%u wl_shm=%p\n",
+                 window, impl->wrapper->width, impl->wrapper->height, impl->scale,
+                 display_wayland->shm);
 
       impl->staging_cairo_surface = _gdk_wayland_display_create_shm_surface (display_wayland,
                                                                              impl->wrapper->width,
@@ -1119,12 +1136,13 @@ gdk_wayland_window_ref_cairo_surface (GdkWindow *window)
   if (GDK_WINDOW_DESTROYED (impl->wrapper))
     return NULL;
 
-  fprintf (stderr,
-           "gdk-wayland: ref cairo window=%p size=%dx%d scale=%u egl=%p staging=%p shm=%d\n",
-           window, impl->wrapper->width, impl->wrapper->height, impl->scale,
-           impl->display_server.egl_window,
-           impl->staging_cairo_surface,
-           _gdk_wayland_is_shm_surface (impl->staging_cairo_surface));
+  if (gdk_wayland_xv6_trace_enabled ())
+    fprintf (stderr,
+             "gdk-wayland: ref cairo window=%p size=%dx%d scale=%u egl=%p staging=%p shm=%d\n",
+             window, impl->wrapper->width, impl->wrapper->height, impl->scale,
+             impl->display_server.egl_window,
+             impl->staging_cairo_surface,
+             _gdk_wayland_is_shm_surface (impl->staging_cairo_surface));
 
   gdk_wayland_window_ensure_cairo_surface (window);
 
@@ -1132,10 +1150,11 @@ gdk_wayland_window_ref_cairo_surface (GdkWindow *window)
     {
       GdkWaylandDisplay *display_wayland = GDK_WAYLAND_DISPLAY (gdk_window_get_display (impl->wrapper));
 
-      fprintf (stderr,
-               "gdk-wayland: ref cairo retry SHM window=%p size=%dx%d scale=%u wl_shm=%p\n",
-               window, MAX (impl->wrapper->width, 1), MAX (impl->wrapper->height, 1),
-               impl->scale, display_wayland->shm);
+      if (gdk_wayland_xv6_trace_enabled ())
+        fprintf (stderr,
+                 "gdk-wayland: ref cairo retry SHM window=%p size=%dx%d scale=%u wl_shm=%p\n",
+                 window, MAX (impl->wrapper->width, 1), MAX (impl->wrapper->height, 1),
+                 impl->scale, display_wayland->shm);
 
       impl->staging_cairo_surface = _gdk_wayland_display_create_shm_surface (display_wayland,
                                                                              MAX (impl->wrapper->width, 1),
@@ -1188,10 +1207,11 @@ gdk_window_impl_wayland_end_paint (GdkWindow *window)
       !window->current_paint.use_gl &&
       !cairo_region_is_empty (window->current_paint.region))
     {
-      fprintf (stderr,
-               "gdk-wayland: end-paint attach image window=%p size=%dx%d egl=%p\n",
-               window, window->width, window->height,
-               impl->display_server.egl_window);
+      if (gdk_wayland_xv6_trace_enabled ())
+        fprintf (stderr,
+                 "gdk-wayland: end-paint attach image window=%p size=%dx%d egl=%p\n",
+                 window, window->width, window->height,
+                 impl->display_server.egl_window);
 
       gdk_wayland_window_attach_image (window);
 
@@ -2066,12 +2086,13 @@ gdk_wayland_window_handle_configure (GdkWindow *window,
     gdk_wayland_window_update_dialogs (window);
 
   impl->pending_commit = TRUE;
-  fprintf (stderr,
-           "gdk-wayland: configured window=%p serial=%u size=%dx%d pending_commit=1 egl=%p staging=%p shm=%d\n",
-           window, serial, window->width, window->height,
-           impl->display_server.egl_window,
-           impl->staging_cairo_surface,
-           _gdk_wayland_is_shm_surface (impl->staging_cairo_surface));
+  if (gdk_wayland_xv6_trace_enabled ())
+    fprintf (stderr,
+             "gdk-wayland: configured window=%p serial=%u size=%dx%d pending_commit=1 egl=%p staging=%p shm=%d\n",
+             window, serial, window->width, window->height,
+             impl->display_server.egl_window,
+             impl->staging_cairo_surface,
+             _gdk_wayland_is_shm_surface (impl->staging_cairo_surface));
   gdk_frame_clock_request_phase (frame_clock,
                                  GDK_FRAME_CLOCK_PHASE_AFTER_PAINT);
 }
