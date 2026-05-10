@@ -886,8 +886,6 @@ _gdk_wayland_display_create_window_impl (GdkDisplay    *display,
 
   impl = g_object_new (GDK_TYPE_WINDOW_IMPL_WAYLAND, NULL);
   window->impl = GDK_WINDOW_IMPL (impl);
-  impl->unconfigured_width = window->width;
-  impl->unconfigured_height = window->height;
   impl->wrapper = GDK_WINDOW (window);
   impl->shortcuts_inhibitors = g_hash_table_new (NULL, NULL);
   impl->using_csd = TRUE;
@@ -921,6 +919,9 @@ _gdk_wayland_display_create_window_impl (GdkDisplay    *display,
       g_warning ("Native Windows taller than 65535 pixels are not supported");
       window->height = 65535;
     }
+
+  impl->unconfigured_width = window->width;
+  impl->unconfigured_height = window->height;
 
   g_object_ref (window);
 
@@ -1307,6 +1308,8 @@ gdk_wayland_window_configure (GdkWindow *window,
 
   g_return_if_fail (width > 0);
   g_return_if_fail (height > 0);
+
+  xv6_clamp_toplevel_size (window, &width, &height);
 
   event = gdk_event_new (GDK_CONFIGURE);
   event->configure.window = g_object_ref (window);
@@ -2048,6 +2051,7 @@ gdk_wayland_window_handle_configure (GdkWindow *window,
         calculate_width_with_margin (window, impl->unconfigured_width);
       unconfigured_height =
         calculate_height_with_margin (window, impl->unconfigured_height);
+      xv6_clamp_toplevel_size (window, &unconfigured_width, &unconfigured_height);
       gdk_wayland_window_configure (window,
                                     unconfigured_width,
                                     unconfigured_height,
