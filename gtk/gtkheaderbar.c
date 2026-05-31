@@ -327,6 +327,21 @@ _gtk_header_bar_update_window_buttons (GtkHeaderBar *bar)
                           gtk_window_get_transient_for (window) == NULL &&
                           gtk_window_get_type_hint (window) == GDK_WINDOW_TYPE_HINT_NORMAL);
 
+  /*
+   * xv6 has no external Wayland window manager decorating client-side GTK
+   * titlebars.  Some staged apps request a close-only HeaderBar layout; keep
+   * normal top-level windows consistent with the desktop controls instead.
+   */
+  if (!gtk_window_get_modal (window) &&
+      gtk_window_get_transient_for (window) == NULL &&
+      (!layout_desc ||
+       !strstr (layout_desc, "minimize") ||
+       !strstr (layout_desc, "maximize")))
+    {
+      g_free (layout_desc);
+      layout_desc = g_strdup ("menu:minimize,maximize,close");
+    }
+
   tokens = g_strsplit (layout_desc, ":", 2);
   if (tokens)
     {
@@ -395,8 +410,7 @@ _gtk_header_bar_update_window_buttons (GtkHeaderBar *bar)
                     gtk_image_set_from_icon_name (GTK_IMAGE (priv->titlebar_icon),
                                                   "application-x-executable-symbolic", GTK_ICON_SIZE_MENU);
                 }
-              else if (strcmp (t[j], "minimize") == 0 &&
-                       is_sovereign_window)
+              else if (strcmp (t[j], "minimize") == 0)
                 {
                   button = gtk_button_new ();
                   gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
@@ -415,8 +429,7 @@ _gtk_header_bar_update_window_buttons (GtkHeaderBar *bar)
                     atk_object_set_name (accessible, _("Minimize"));
                 }
               else if (strcmp (t[j], "maximize") == 0 &&
-                       gtk_window_get_resizable (window) &&
-                       is_sovereign_window)
+                       gtk_window_get_resizable (window))
                 {
                   const gchar *icon_name;
                   gboolean maximized = gtk_window_is_maximized (window);
