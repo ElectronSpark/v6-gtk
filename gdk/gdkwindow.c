@@ -2826,12 +2826,6 @@ gdk_window_get_content (GdkWindow *window)
   g_return_val_if_fail (GDK_IS_WINDOW (window), 0);
 
   surface = gdk_window_ref_impl_surface (window);
-  if (surface == NULL)
-    {
-      g_warning ("GDK window implementation returned no cairo surface for content query");
-      return CAIRO_CONTENT_COLOR_ALPHA;
-    }
-
   content = cairo_surface_get_content (surface);
   cairo_surface_destroy (surface);
 
@@ -3589,11 +3583,6 @@ _gdk_window_ref_cairo_surface (GdkWindow *window)
   g_return_val_if_fail (GDK_IS_WINDOW (window), NULL);
 
   surface = ref_window_surface (window);
-  if (surface == NULL)
-    {
-      g_warning ("GDK window implementation returned no cairo surface");
-      return NULL;
-    }
 
   if (gdk_window_has_impl (window))
     {
@@ -3647,17 +3636,6 @@ gdk_cairo_create (GdkWindow *window)
   g_return_val_if_fail (GDK_IS_WINDOW (window), NULL);
 
   surface = _gdk_window_ref_cairo_surface (window);
-  if (surface == NULL)
-    {
-      cairo_surface_t *fallback;
-      cairo_t *fallback_cr;
-
-      g_warning ("GDK window implementation returned no cairo surface for cairo context");
-      fallback = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
-      fallback_cr = cairo_create (fallback);
-      cairo_surface_destroy (fallback);
-      return fallback_cr;
-    }
 
   cr = cairo_create (surface);
 

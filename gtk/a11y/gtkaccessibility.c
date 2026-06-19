@@ -972,19 +972,10 @@ do_window_event_initialization (void)
 void
 _gtk_accessibility_init (void)
 {
-  const gchar *disable_a11y;
-
   if (initialized)
     return;
 
   initialized = TRUE;
-
-  disable_a11y = g_getenv ("XV6_GTK_DISABLE_ACCESSIBILITY");
-  if (disable_a11y != NULL &&
-      disable_a11y[0] != '\0' &&
-      g_strcmp0 (disable_a11y, "0") != 0)
-    return;
-
   quark_focus_object = g_quark_from_static_string ("gail-focus-object");
 
   G_GNUC_BEGIN_IGNORE_DEPRECATIONS;

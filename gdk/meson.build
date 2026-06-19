@@ -30,7 +30,6 @@ gdk_sources = files(
   'gdkrgba.c',
   'gdkscreen.c',
   'gdkselection.c',
-  'gdk-x11-compat-stubs.c',
   'gdkvisual.c',
   'gdkwindow.c',
   'gdkwindowimpl.c',
